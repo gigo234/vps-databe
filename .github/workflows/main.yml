@@ -1,64 +1,71 @@
-name: RDP_LINUX_TAILSCALE
+name: RDP_DEBIAN_STYLE_TAILSCALE
 
 on:
   # Mengizinkan menjalankan workflow secara manual dari Actions tab di GitHub
   workflow_dispatch:
 
 jobs:
-  secure-rdp-linux:
-    # Menggunakan runner Ubuntu Linux terbaru
+  secure-rdp-debian:
+    # Menggunakan runner Ubuntu terbaru (Runner Linux yang tersedia)
     runs-on: ubuntu-latest
     # Menentukan waktu maksimal (6 jam)
     timeout-minutes: 360
 
     steps:
-      - name: Update System and Install Dependencies
+      - name: Update System and Install XFCE/XRDP
         run: |
           # Perbarui sistem
           sudo apt update -y
           
-          # Instal dependencies, XRDP untuk Remote Desktop, dan lingkungan desktop XFCE
+          # Instal paket yang dibutuhkan: XRDP untuk RDP, dan XFCE4 sebagai desktop environment ringan
           sudo apt install -y xrdp xfce4 xfce4-goodies
           
-          # Tambahkan user 'github' dan berikan password
-          sudo useradd -m github -s /bin/bash
-          echo "github:YourSecurePasswordHere" | sudo chpasswd
+      - name: Create RDP User and Configure Session
+        run: |
+          # Kredensial User
+          RDP_USER="debianuser"
+          RDP_PASS="YourSecurePasswordHere" # Ganti dengan password yang kuat!
+
+          # Tambahkan user baru dan berikan password
+          sudo useradd -m $RDP_USER -s /bin/bash
+          echo "$RDP_USER:$RDP_PASS" | sudo chpasswd
           
-          # Tambahkan user 'github' ke grup sudo agar bisa menjalankan perintah root
-          sudo usermod -aG sudo github
+          # Tambahkan user ke grup sudo dan ssl-cert (diperlukan oleh xrdp)
+          sudo usermod -aG sudo $RDP_USER
+          sudo usermod -aG ssl-cert $RDP_USER
 
           # Konfigurasi XRDP agar menggunakan XFCE
-          echo xfce4-session > ~/.xsession
-          sudo mv ~/.xsession /home/github/.xsession
-          sudo chown github:github /home/github/.xsession
+          echo xfce4-session > /home/$RDP_USER/.xsession
+          sudo mv /home/$RDP_USER/.xsession /etc/skel/.xsession # Pastikan konfigurasi default ada
+          sudo chown $RDP_USER:$RDP_USER /home/$RDP_USER/.xsession
 
           # Aktifkan dan jalankan layanan XRDP
           sudo systemctl enable xrdp
           sudo systemctl start xrdp
           
           # Tampilkan kredensial user untuk RDP
-          echo "::notice file=README.md,line=1::RDP USER: github"
-          echo "::notice file=README.md,line=2::RDP PASSWORD: YourSecurePasswordHere"
-          
+          echo "::notice file=README.md,line=1::RDP USER: $RDP_USER"
+          echo "::notice file=README.md,line=2::RDP PASSWORD: $RDP_PASS"
+
       - name: Install and Configure Tailscale
         env:
           # Mengambil Tailscale Auth Key dari GitHub Secrets
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          # 1. Tambahkan repositori resmi Tailscale (menggunakan skrip instalasi)
-          curl -fsSL https://tailscale.com/install.sh | sh
+          # 1. Tambahkan repositori resmi Tailscale (menggunakan skrip instalasi yang kompatibel dengan Debian/Ubuntu)
+          curl -fsSL https://tailscale.com/install.sh | sudo sh
           
           # 2. Jalankan Tailscale menggunakan Auth Key
-          sudo tailscale up --authkey=$TAILSCALE_AUTH_KEY --hostname="github-linux-rdp-${{ github.run_id }}" --accept-routes=true
+          sudo tailscale up --authkey=$TAILSCALE_AUTH_KEY --hostname="github-debian-rdp-${{ github.run_id }}" --accept-routes=true
           
           # 3. Tampilkan IP Tailscale untuk koneksi
           TAILSCALE_IP=$(sudo tailscale ip -4)
           echo "::notice file=README.md,line=3::TAILSCALE IP ADDRESS: $TAILSCALE_IP"
           
-      - name: Wait for Tailscale IP Assignment (360 Minutes)
+      - name: Keep Runner Alive (6 Hours)
         run: |
           # Langkah menunggu agar RDP tetap aktif selama 6 jam (sesuai timeout-minutes)
-          echo "RDP is ready. Waiting for 360 minutes before system timeout."
+          echo "RDP is ready. Waiting for 6 hours before system timeout."
           sleep 21600 # 360 menit x 60 detik = 21600 detik
           
       # Hentikan runner setelah waktu tunggu berakhir
