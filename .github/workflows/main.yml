@@ -1,34 +1,4 @@
-name: RDP_DEBIAN_STYLE_TAILSCALE
-
-on:
-  workflow_dispatch:
-
-jobs:
-  secure-rdp-debian:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-
-    steps:
-      - name: Update System and Install XFCE/XRDP
-        run: |
-          sudo apt update -y
-          sudo apt install -y xrdp xfce4 xfce4-goodies
-          
-          # --- PERBAIKAN PENTING UNTUK XRDP/XFCE ---
-          # 1. Edit file startwm.sh untuk memastikan sesi XFCE dimuat dengan benar
-          # Hapus baris default yang mungkin mengganggu
-          sudo sed -i.bak '/^test -x/i#\n' /etc/xrdp/startwm.sh
-          sudo sed -i.bak 's/test -x \/etc\/X11\/Xsession && exec \/etc\/X11\/Xsession/#test -x \/etc\/X11\/Xsession \&\& exec \/etc\/X11\/Xsession/g' /etc/xrdp/startwm.sh
-          
-          # Tambahkan perintah untuk menjalankan XFCE4
-          sudo sed -i.bak 's/.*xhost +/xhost +/g' /etc/xrdp/startwm.sh
-          sudo sed -i.bak 's/.*xrdp-sesadmin/xrdp-sesadmin/g' /etc/xrdp/startwm.sh
-          sudo sed -i '/^xhost +/a xfce4-session' /etc/xrdp/startwm.sh
-          
-          # Restart layanan XRDP setelah konfigurasi
-          sudo systemctl restart xrdp
-          
-      - name: Create RDP User and Configure Session
+- name: Create RDP User and Configure Session
         run: |
           # Kredensial User
           RDP_USER="debianuser"
@@ -38,35 +8,22 @@ jobs:
           sudo useradd -m $RDP_USER -s /bin/bash
           echo "$RDP_USER:$RDP_PASS" | sudo chpasswd
           
-          # Tambahkan user ke grup
+          # Tambahkan user ke grup yang dibutuhkan
           sudo usermod -aG sudo $RDP_USER
           sudo usermod -aG ssl-cert $RDP_USER
-
-          # Konfigurasi .xsession
-          echo "xfce4-session" | sudo tee /home/$RDP_USER/.xsession > /dev/null
+          
+          # --- KONFIGURASI XFCE UNTUK XRDP ---
+          # 1. Buat direktori konfigurasi .xsession di home directory pengguna
+          echo "startxfce4" > /home/$RDP_USER/.xsession
+          
+          # 2. Pastikan izinnya benar
           sudo chmod +x /home/$RDP_USER/.xsession
           sudo chown $RDP_USER:$RDP_USER /home/$RDP_USER/.xsession
+
+          # 3. AKTIFKAN LAYANAN XRDP (Hapus baris ini dari langkah sebelumnya jika ada)
+          sudo systemctl enable xrdp
+          sudo systemctl start xrdp
           
           # Tampilkan kredensial user untuk RDP
           echo "::notice file=README.md,line=1::RDP USER: $RDP_USER"
           echo "::notice file=README.md,line=2::RDP PASSWORD: $RDP_PASS"
-
-      - name: Install and Configure Tailscale
-        env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
-        run: |
-          curl -fsSL https://tailscale.com/install.sh | sudo sh
-          
-          sudo tailscale up --authkey=$TAILSCALE_AUTH_KEY --hostname="github-debian-rdp-${{ github.run_id }}" --accept-routes=true
-          
-          TAILSCALE_IP=$(sudo tailscale ip -4)
-          echo "::notice file=README.md,line=3::TAILSCALE IP ADDRESS: $TAILSCALE_IP"
-          
-      - name: Keep Runner Alive (6 Hours)
-        run: |
-          echo "RDP is ready. Waiting for 6 hours before system timeout."
-          sleep 21600
-          
-      - name: End Job
-        if: always()
-        run: echo "Workflow finished."
