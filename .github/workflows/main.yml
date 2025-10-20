@@ -14,31 +14,40 @@ jobs:
           sudo apt update -y
           sudo apt install -y xrdp xfce4 xfce4-goodies
           
+          # --- PERBAIKAN PENTING UNTUK XRDP/XFCE ---
+          # 1. Edit file startwm.sh untuk memastikan sesi XFCE dimuat dengan benar
+          # Hapus baris default yang mungkin mengganggu
+          sudo sed -i.bak '/^test -x/i#\n' /etc/xrdp/startwm.sh
+          sudo sed -i.bak 's/test -x \/etc\/X11\/Xsession && exec \/etc\/X11\/Xsession/#test -x \/etc\/X11\/Xsession \&\& exec \/etc\/X11\/Xsession/g' /etc/xrdp/startwm.sh
+          
+          # Tambahkan perintah untuk menjalankan XFCE4
+          sudo sed -i.bak 's/.*xhost +/xhost +/g' /etc/xrdp/startwm.sh
+          sudo sed -i.bak 's/.*xrdp-sesadmin/xrdp-sesadmin/g' /etc/xrdp/startwm.sh
+          sudo sed -i '/^xhost +/a xfce4-session' /etc/xrdp/startwm.sh
+          
+          # Restart layanan XRDP setelah konfigurasi
+          sudo systemctl restart xrdp
+          
       - name: Create RDP User and Configure Session
         run: |
           # Kredensial User
           RDP_USER="debianuser"
           RDP_PASS="YourSecurePasswordHere" # Ganti dengan password yang kuat!
           
-          # 1. Tambahkan user baru dan berikan password (Hanya perlu sekali 'sudo')
+          # Tambahkan user baru dan berikan password
           sudo useradd -m $RDP_USER -s /bin/bash
           echo "$RDP_USER:$RDP_PASS" | sudo chpasswd
           
-          # 2. Tambahkan user ke grup
+          # Tambahkan user ke grup
           sudo usermod -aG sudo $RDP_USER
           sudo usermod -aG ssl-cert $RDP_USER
-          
-          # 3. Konfigurasi XRDP agar menggunakan XFCE
-          # Buat file .xsession di home directory pengguna dan pastikan kepemilikannya benar
+
+          # Konfigurasi .xsession
           echo "xfce4-session" | sudo tee /home/$RDP_USER/.xsession > /dev/null
           sudo chmod +x /home/$RDP_USER/.xsession
           sudo chown $RDP_USER:$RDP_USER /home/$RDP_USER/.xsession
-
-          # 4. Aktifkan dan jalankan layanan XRDP
-          sudo systemctl enable xrdp
-          sudo systemctl start xrdp
           
-          # 5. Tampilkan kredensial user untuk RDP
+          # Tampilkan kredensial user untuk RDP
           echo "::notice file=README.md,line=1::RDP USER: $RDP_USER"
           echo "::notice file=README.md,line=2::RDP PASSWORD: $RDP_PASS"
 
