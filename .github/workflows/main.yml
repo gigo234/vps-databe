@@ -1,114 +1,67 @@
-name: RDP_TIPSUNIX
+name: RDP_LINUX_TAILSCALE
 
 on:
+  # Mengizinkan menjalankan workflow secara manual dari Actions tab di GitHub
   workflow_dispatch:
 
 jobs:
-  secure-rdp:
-    runs-on: windows-latest
-    timeout-minutes: 3600
+  secure-rdp-linux:
+    # Menggunakan runner Ubuntu Linux terbaru
+    runs-on: ubuntu-latest
+    # Menentukan waktu maksimal (6 jam)
+    timeout-minutes: 360
 
     steps:
-      - name: Configure Core RDP Settings
+      - name: Update System and Install Dependencies
         run: |
-          # Enable Remote Desktop and disable Network Level Authentication (if needed)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
-
-          # Remove any existing rule with the same name to avoid duplication
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          # Perbarui sistem
+          sudo apt update -y
           
-          # For testing, allow any incoming connection on port 3389
-          netsh advfirewall firewall add rule name="RDP-Tailscale" `
-            dir=in action=allow protocol=TCP localport=3389
+          # Instal dependencies, XRDP untuk Remote Desktop, dan lingkungan desktop XFCE
+          sudo apt install -y xrdp xfce4 xfce4-goodies
+          
+          # Tambahkan user 'github' dan berikan password
+          sudo useradd -m github -s /bin/bash
+          echo "github:YourSecurePasswordHere" | sudo chpasswd
+          
+          # Tambahkan user 'github' ke grup sudo agar bisa menjalankan perintah root
+          sudo usermod -aG sudo github
 
-          # (Optional) Restart the Remote Desktop service to ensure changes take effect
-          Restart-Service -Name TermService -Force
+          # Konfigurasi XRDP agar menggunakan XFCE
+          echo xfce4-session > ~/.xsession
+          sudo mv ~/.xsession /home/github/.xsession
+          sudo chown github:github /home/github/.xsession
 
-      - name: Create RDP User with Secure Password
+          # Aktifkan dan jalankan layanan XRDP
+          sudo systemctl enable xrdp
+          sudo systemctl start xrdp
+          
+          # Tampilkan kredensial user untuk RDP
+          echo "::notice file=README.md,line=1::RDP USER: github"
+          echo "::notice file=README.md,line=2::RDP PASSWORD: YourSecurePasswordHere"
+          
+      - name: Install and Configure Tailscale
+        env:
+          # Mengambil Tailscale Auth Key dari GitHub Secrets
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          Add-Type -AssemblyName System.Security
-          $charSet = @{
-              Upper   = [char[]](65..90)      # A-Z
-              Lower   = [char[]](97..122)     # a-z
-              Number  = [char[]](48..57)      # 0-9
-              Special = ([char[]](33..47) + [char[]](58..64) +
-                         [char[]](91..96) + [char[]](123..126)) # Special characters
-          }
-          $rawPassword = @()
-          $rawPassword += $charSet.Upper | Get-Random -Count 4
-          $rawPassword += $charSet.Lower | Get-Random -Count 4
-          $rawPassword += $charSet.Number | Get-Random -Count 4
-          $rawPassword += $charSet.Special | Get-Random -Count 4
-          $password = -join ($rawPassword | Sort-Object { Get-Random })
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          # 1. Tambahkan repositori resmi Tailscale (menggunakan skrip instalasi)
+          curl -fsSL https://tailscale.com/install.sh | sh
           
-          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
+          # 2. Jalankan Tailscale menggunakan Auth Key
+          sudo tailscale up --authkey=$TAILSCALE_AUTH_KEY --hostname="github-linux-rdp-${{ github.run_id }}" --accept-routes=true
           
-          if (-not (Get-LocalUser -Name "RDP")) {
-              Write-Error "User creation failed"
-              exit 1
-          }
-
-      - name: Install Tailscale
+          # 3. Tampilkan IP Tailscale untuk koneksi
+          TAILSCALE_IP=$(sudo tailscale ip -4)
+          echo "::notice file=README.md,line=3::TAILSCALE IP ADDRESS: $TAILSCALE_IP"
+          
+      - name: Wait for Tailscale IP Assignment (360 Minutes)
         run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $installerPath = "$env:TEMP\tailscale.msi"
+          # Langkah menunggu agar RDP tetap aktif selama 6 jam (sesuai timeout-minutes)
+          echo "RDP is ready. Waiting for 360 minutes before system timeout."
+          sleep 21600 # 360 menit x 60 detik = 21600 detik
           
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
-
-      - name: Establish Tailscale Connection
-        run: |
-          # Bring up Tailscale with the provided auth key and set a unique hostname
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-          
-          # Wait for Tailscale to assign an IP
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
-          }
-          
-          if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
-              exit 1
-          }
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-      
-      - name: Verify RDP Accessibility
-        run: |
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          
-          # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
-          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-          if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to RDP port 3389 failed"
-              exit 1
-          }
-          Write-Host "TCP connectivity successful!"
-
-      - name: Maintain Connection
-        run: |
-          Write-Host "`n=== RDP ACCESS ==="
-          Write-Host "http://www.youtube.com/@TipsUNIX"
-          Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
-          Write-Host "==================`n"
-          
-          # Keep runner active indefinitely (or until manually cancelled)
-          while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
-              Start-Sleep -Seconds 300
-          }
+      # Hentikan runner setelah waktu tunggu berakhir
+      - name: End Job
+        if: always()
+        run: echo "Workflow finished."
