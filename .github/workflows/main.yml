@@ -1,10 +1,15 @@
-name: RDP_DEBIAN_STYLE_TAILSCALE
+name: Deploy n8n via Docker Compose
 
 on:
   push:
-    # Workflow ini akan berjalan setiap kali ada push ke branch 'main'
+    # Jalankan saat ada push ke branch 'main'
     branches:
       - main
+    # Opsional: Jika Anda hanya ingin deploy saat ada perubahan di folder Docker
+    # paths:
+    #   - 'docker/**'
+    #   - 'docker-compose.yml'
+  
   # Memberikan opsi untuk menjalankan workflow secara manual dari tab Actions
   workflow_dispatch:
 
@@ -13,42 +18,50 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout kode
+      - name: Checkout Kode
         uses: actions/checkout@v4
 
-      - name: Deploy via SSH
-        # Menggunakan action pihak ketiga yang populer untuk SSH deployment
+      # ----------------------------------------------------
+      # Langkah 1: Transfer file Docker Compose ke VPS
+      # ----------------------------------------------------
+      - name: Transfer Docker Compose File via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          # Direktori sumber (source): file di GitHub repo yang ingin dikirim
+          source: "docker-compose.yml" 
+          # Direktori tujuan (target): di VPS
+          target: ${{ secrets.DEPLOY_DIR }}
+
+      # ----------------------------------------------------
+      # Langkah 2: Update dan Restart n8n di VPS
+      # ----------------------------------------------------
+      - name: Update dan Restart n8n via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # Port SSH, default-nya adalah 22
           port: 22 
-          # Perintah yang akan dijalankan di VPS setelah koneksi SSH dibuat
+          # Perintah yang dijalankan di dalam VPS
           script: |
-            echo "Memulai deployment..."
+            echo "Memulai update n8n..."
             
-            # Pindah ke direktori deployment
+            # Pindah ke direktori deployment n8n
             cd ${{ secrets.DEPLOY_DIR }}
             
-            # Pull kode terbaru dari GitHub
-            # Pastikan Git sudah diinisialisasi di direktori ini
-            git pull origin main
+            # (Opsional) Backup file konfigurasi penting jika ada perubahan
+            # cp docker-compose.yml docker-compose.yml.bak
             
-            # Lakukan langkah-langkah tambahan spesifik untuk aplikasi Anda (contoh):
-            # 1. Install dependencies (jika ada, misal Node.js atau PHP)
-            # npm install
-            # composer install --no-dev --optimize-autoloader
+            # Pull image Docker terbaru dari n8nio/n8n
+            docker-compose pull
             
-            # 2. Build assets (jika ada)
-            # npm run build
+            # Restart container dengan konfigurasi baru (jika ada perubahan di .yml)
+            # -d = run in detached mode (background)
+            docker-compose up -d
             
-            # 3. Migrasi database (jika ada)
-            # php artisan migrate --force
-            
-            # 4. Restart service aplikasi Anda (misal menggunakan PM2 atau Systemd)
-            # pm2 restart nama-aplikasi
-            # sudo systemctl restart nama-service
-            
-            echo "Deployment selesai!"
+            echo "Update n8n selesai! Cek status..."
+            docker ps -a | grep n8n
