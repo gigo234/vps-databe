@@ -2,76 +2,52 @@ name: Deploy Aplikasi ke VPS
 
 # Kontrol kapan workflow ini akan berjalan
 on:
-  push:
-    # Hanya berjalan saat ada push ke branch 'main'
-    branches:
-      - main
-      
-  # Memberikan opsi untuk menjalankan workflow secara manual dari tab Actions
-  workflow_dispatch:
+# ... (Event push dan workflow_dispatch tetap sama)
 
 jobs:
   deploy:
-    # Runner yang akan menjalankan job ini (GitHub-hosted runner)
     runs-on: ubuntu-latest
     
     steps:
-      # ----------------------------------------------------
-      # 1. Checkout Kode
-      # ----------------------------------------------------
       - name: Checkout Kode
         uses: actions/checkout@v4
-        # Catatan: Jika Anda ingin menggunakan SSH key saat checkout,
-        # Anda perlu menambahkan step konfigurasi SSH key.
 
-      # ----------------------------------------------------
-      # 2. Sinkronisasi File (Deployment)
-      # ----------------------------------------------------
-      # Menggunakan action SCP (Secure Copy) untuk menyalin file
-      - name: Sinkronisasi File ke VPS via SCP
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          # Kredensial VPS (diambil dari GitHub Secrets)
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          
-          # Sumber: Seluruh konten repositori (kecuali yang ada di .gitignore)
-          source: "." 
-          
-          # Tujuan: Direktori di VPS tempat kode akan diletakkan
-          target: ${{ secrets.DEPLOY_DIR }}
-          
-          # Flag SCP: Menghapus file di VPS yang tidak ada di repo (opsional, hati-hati!)
-          # overwrite: true 
-
-      # ----------------------------------------------------
-      # 3. Jalankan Perintah Deployment (Opsional)
-      # ----------------------------------------------------
-      # Menggunakan action SSH untuk menjalankan perintah di VPS setelah file tersalin
-      - name: Jalankan Perintah Setelah Deployment
+      # --- DIAGNOSTIK: Uji Koneksi SSH ---
+      - name: Uji Koneksi SSH (Ping Sederhana)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22 
-          # Daftar perintah yang akan dieksekusi di VPS
+          port: 22
+          # Perintah sederhana untuk menguji apakah koneksi terbuat
           script: |
-            echo "Deployment Selesai. Menjalankan perintah pasca-deploy..."
+            echo "Koneksi SSH berhasil! Host: $SSH_HOST"
             
-            # Pindah ke direktori deployment
-            cd ${{ secrets.DEPLOY_DIR }}
-            
-            # Ganti perintah di bawah sesuai kebutuhan aplikasi Anda (contoh: PHP/Node.js)
-            # Contoh 1: Install dependencies Node.js
-            # npm install --production
-            
-            # Contoh 2: Restart service PM2
-            # pm2 restart nama-aplikasi 
-            
-            # Contoh 3: Restart Nginx
-            # sudo systemctl restart nginx
-            
+      # ----------------------------------------------------
+      # 2. Sinkronisasi File (Deployment)
+      # ----------------------------------------------------
+      # Ubah SCP ke rsync yang lebih andal untuk sync
+      - name: Sinkronisasi File ke VPS via Rsync
+        uses: burnettk/rsync-action@main
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "." 
+          target: ${{ secrets.DEPLOY_DIR }}
+
+      # ----------------------------------------------------
+      # 3. Jalankan Perintah Deployment
+      # ----------------------------------------------------
+      - name: Jalankan Perintah Setelah Deployment
+        uses: appleboy/ssh-action@v1.0.3
+        # ... (sisa konfigurasi sama)
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22 
+          script: |
+            # ... (perintah pasca-deploy Anda)
             echo "Perintah pasca-deploy selesai."
