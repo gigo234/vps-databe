@@ -1,67 +1,77 @@
-name: Deploy n8n via Docker Compose
+name: Deploy Aplikasi ke VPS
 
+# Kontrol kapan workflow ini akan berjalan
 on:
   push:
-    # Jalankan saat ada push ke branch 'main'
+    # Hanya berjalan saat ada push ke branch 'main'
     branches:
       - main
-    # Opsional: Jika Anda hanya ingin deploy saat ada perubahan di folder Docker
-    # paths:
-    #   - 'docker/**'
-    #   - 'docker-compose.yml'
-  
+      
   # Memberikan opsi untuk menjalankan workflow secara manual dari tab Actions
   workflow_dispatch:
 
 jobs:
   deploy:
+    # Runner yang akan menjalankan job ini (GitHub-hosted runner)
     runs-on: ubuntu-latest
     
     steps:
+      # ----------------------------------------------------
+      # 1. Checkout Kode
+      # ----------------------------------------------------
       - name: Checkout Kode
         uses: actions/checkout@v4
+        # Catatan: Jika Anda ingin menggunakan SSH key saat checkout,
+        # Anda perlu menambahkan step konfigurasi SSH key.
 
       # ----------------------------------------------------
-      # Langkah 1: Transfer file Docker Compose ke VPS
+      # 2. Sinkronisasi File (Deployment)
       # ----------------------------------------------------
-      - name: Transfer Docker Compose File via SCP
+      # Menggunakan action SCP (Secure Copy) untuk menyalin file
+      - name: Sinkronisasi File ke VPS via SCP
         uses: appleboy/scp-action@v0.1.7
         with:
+          # Kredensial VPS (diambil dari GitHub Secrets)
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          # Direktori sumber (source): file di GitHub repo yang ingin dikirim
-          source: "docker-compose.yml" 
-          # Direktori tujuan (target): di VPS
+          
+          # Sumber: Seluruh konten repositori (kecuali yang ada di .gitignore)
+          source: "." 
+          
+          # Tujuan: Direktori di VPS tempat kode akan diletakkan
           target: ${{ secrets.DEPLOY_DIR }}
+          
+          # Flag SCP: Menghapus file di VPS yang tidak ada di repo (opsional, hati-hati!)
+          # overwrite: true 
 
       # ----------------------------------------------------
-      # Langkah 2: Update dan Restart n8n di VPS
+      # 3. Jalankan Perintah Deployment (Opsional)
       # ----------------------------------------------------
-      - name: Update dan Restart n8n via SSH
+      # Menggunakan action SSH untuk menjalankan perintah di VPS setelah file tersalin
+      - name: Jalankan Perintah Setelah Deployment
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22 
-          # Perintah yang dijalankan di dalam VPS
+          # Daftar perintah yang akan dieksekusi di VPS
           script: |
-            echo "Memulai update n8n..."
+            echo "Deployment Selesai. Menjalankan perintah pasca-deploy..."
             
-            # Pindah ke direktori deployment n8n
+            # Pindah ke direktori deployment
             cd ${{ secrets.DEPLOY_DIR }}
             
-            # (Opsional) Backup file konfigurasi penting jika ada perubahan
-            # cp docker-compose.yml docker-compose.yml.bak
+            # Ganti perintah di bawah sesuai kebutuhan aplikasi Anda (contoh: PHP/Node.js)
+            # Contoh 1: Install dependencies Node.js
+            # npm install --production
             
-            # Pull image Docker terbaru dari n8nio/n8n
-            docker-compose pull
+            # Contoh 2: Restart service PM2
+            # pm2 restart nama-aplikasi 
             
-            # Restart container dengan konfigurasi baru (jika ada perubahan di .yml)
-            # -d = run in detached mode (background)
-            docker-compose up -d
+            # Contoh 3: Restart Nginx
+            # sudo systemctl restart nginx
             
-            echo "Update n8n selesai! Cek status..."
-            docker ps -a | grep n8n
+            echo "Perintah pasca-deploy selesai."
