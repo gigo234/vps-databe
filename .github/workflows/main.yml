@@ -1,29 +1,54 @@
-- name: Create RDP User and Configure Session
-        run: |
-          # Kredensial User
-          RDP_USER="debianuser"
-          RDP_PASS="YourSecurePasswordHere" # Ganti dengan password yang kuat!
-          
-          # Tambahkan user baru dan berikan password
-          sudo useradd -m $RDP_USER -s /bin/bash
-          echo "$RDP_USER:$RDP_PASS" | sudo chpasswd
-          
-          # Tambahkan user ke grup yang dibutuhkan
-          sudo usermod -aG sudo $RDP_USER
-          sudo usermod -aG ssl-cert $RDP_USER
-          
-          # --- KONFIGURASI XFCE UNTUK XRDP ---
-          # 1. Buat direktori konfigurasi .xsession di home directory pengguna
-          echo "startxfce4" > /home/$RDP_USER/.xsession
-          
-          # 2. Pastikan izinnya benar
-          sudo chmod +x /home/$RDP_USER/.xsession
-          sudo chown $RDP_USER:$RDP_USER /home/$RDP_USER/.xsession
+name: Deploy ke VPS
 
-          # 3. AKTIFKAN LAYANAN XRDP (Hapus baris ini dari langkah sebelumnya jika ada)
-          sudo systemctl enable xrdp
-          sudo systemctl start xrdp
-          
-          # Tampilkan kredensial user untuk RDP
-          echo "::notice file=README.md,line=1::RDP USER: $RDP_USER"
-          echo "::notice file=README.md,line=2::RDP PASSWORD: $RDP_PASS"
+on:
+  push:
+    # Workflow ini akan berjalan setiap kali ada push ke branch 'main'
+    branches:
+      - main
+  # Memberikan opsi untuk menjalankan workflow secara manual dari tab Actions
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout kode
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        # Menggunakan action pihak ketiga yang populer untuk SSH deployment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          # Port SSH, default-nya adalah 22
+          port: 22 
+          # Perintah yang akan dijalankan di VPS setelah koneksi SSH dibuat
+          script: |
+            echo "Memulai deployment..."
+            
+            # Pindah ke direktori deployment
+            cd ${{ secrets.DEPLOY_DIR }}
+            
+            # Pull kode terbaru dari GitHub
+            # Pastikan Git sudah diinisialisasi di direktori ini
+            git pull origin main
+            
+            # Lakukan langkah-langkah tambahan spesifik untuk aplikasi Anda (contoh):
+            # 1. Install dependencies (jika ada, misal Node.js atau PHP)
+            # npm install
+            # composer install --no-dev --optimize-autoloader
+            
+            # 2. Build assets (jika ada)
+            # npm run build
+            
+            # 3. Migrasi database (jika ada)
+            # php artisan migrate --force
+            
+            # 4. Restart service aplikasi Anda (misal menggunakan PM2 atau Systemd)
+            # pm2 restart nama-aplikasi
+            # sudo systemctl restart nama-service
+            
+            echo "Deployment selesai!"
